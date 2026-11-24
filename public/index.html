@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scan & Print</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<style>
+:root{--paper:#f6f5f1;--card:#fff;--ink:#111;--soft:#6b6b6b;--line:#e2e0da;--accent:#2f5bff;--ok:#0f8a4a;--bad:#c62828}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 Archivo,system-ui,sans-serif}
+header{background:var(--ink);color:#fff;padding:18px max(5vw,16px)}
+header h1{margin:0;font-size:24px;font-weight:800;letter-spacing:-.01em}
+header p{margin:2px 0 0;color:#bbb;font-size:14px}
+main{max-width:760px;margin:0 auto;padding:20px 16px 80px}
+.steps{display:flex;gap:6px;margin:0 0 18px}
+.steps span{flex:1;text-align:center;font-size:13px;padding:8px 4px;border-bottom:3px solid var(--line);color:var(--soft)}
+.steps span.on{border-color:var(--accent);color:var(--ink);font-weight:600}
+.steps span.done{border-color:var(--ink);color:var(--ink)}
+section{display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+section.on{display:block}
+h2{margin:0 0 6px;font-size:22px}
+.muted{color:var(--soft);font-size:14px}
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:2px dashed #c9c6bd;border-radius:12px;padding:34px 16px;text-align:center;cursor:pointer;margin:14px 0}
+.drop:hover,.drop.over{border-color:var(--accent);background:#f3f6ff}
+.drop b{font-size:18px}
+input[type=file]{display:none}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;margin:12px 0}
+.thumbs figure{margin:0;position:relative;background:#eee;border-radius:8px;overflow:hidden;aspect-ratio:210/297}
+.thumbs img,.thumbs canvas{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+.thumbs figcaption{position:absolute;left:4px;top:4px;background:var(--ink);color:#fff;font-size:12px;border-radius:6px;padding:1px 7px}
+.thumbs .x{position:absolute;right:4px;top:4px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:16px;cursor:pointer}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:14px 0}
+.row label{font-weight:600;min-width:90px}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:10px 14px;font:inherit;cursor:pointer;min-height:44px}
+.seg button.on{background:var(--ink);color:#fff}
+.stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:10px}
+.stepper button{width:44px;height:44px;border:0;background:none;font-size:20px;cursor:pointer}
+.stepper output{width:40px;text-align:center;font-weight:600}
+input[type=text]{font:inherit;font-size:16px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;min-height:44px;flex:1}
+.bill{border-top:1px dashed var(--line);margin-top:16px;padding-top:14px;display:flex;justify-content:space-between;align-items:end;gap:10px;flex-wrap:wrap}
+.bill .amt{font-size:36px;font-weight:800;white-space:nowrap}
+.btn{border:0;border-radius:12px;background:var(--accent);color:#fff;font:600 17px Archivo,sans-serif;padding:14px 22px;min-height:50px;cursor:pointer}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.btn.small{font-size:14px;padding:8px 12px;min-height:40px}
+button:focus-visible,.drop:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.paid{background:#e9f7ef;color:var(--ok);border-radius:10px;padding:10px 12px;font-weight:600;margin:10px 0}
+.err{color:var(--bad);font-size:14px;min-height:20px;margin-top:8px}
+.pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin:14px 0}
+.pg{border:1px solid var(--line);border-radius:10px;padding:8px;background:#fafafa}
+.pg canvas{width:100%;aspect-ratio:210/297;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.15);display:block}
+.pg .tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.pg .tools button{flex:1;border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px;font:13px Archivo,sans-serif;min-height:36px;cursor:pointer}
+.pg .tools button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.toggle{display:flex;gap:8px;align-items:center;font-size:15px;cursor:pointer}
+.toggle input{width:20px;height:20px}
+.code{font-size:72px;font-weight:800;letter-spacing:.08em;text-align:center;margin:10px 0}
+.status{text-align:center;font-weight:600;font-size:18px}
+/* crop editor */
+#editor{position:fixed;inset:0;background:rgba(10,10,10,.92);display:none;flex-direction:column;z-index:10}
+#editor.on{display:flex}
+#editor .stage{flex:1;position:relative;touch-action:none}
+#editor canvas{position:absolute;inset:0;width:100%;height:100%}
+#editor .bar{display:flex;gap:8px;padding:12px;flex-wrap:wrap;justify-content:center;background:#000}
+#demoPay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:11;padding:16px}
+#demoPay.on{display:flex}
+#demoPay div{background:#fff;border-radius:14px;padding:22px;max-width:360px;width:100%}
+#busy{position:fixed;inset:0;background:rgba(255,255,255,.75);display:none;align-items:center;justify-content:center;z-index:12;font-weight:600;font-size:18px}
+#busy.on{display:flex}
+</style>
+</head>
+<body>
+<header><h1 id="shopName">Scan & Print</h1><p>Black & white A4 printing · pay online · collect at counter</p></header>
+<main>
+  <div class="steps"><span id="s1" class="on">1 Upload</span><span id="s2">2 Pay</span><span id="s3">3 Crop</span><span id="s4">4 Collect</span></div>
+
+  <section id="stepUpload" class="on">
+    <h2>What do you want to print?</h2>
+    <p class="muted">Photos of documents, screenshots, or PDFs. Everything prints in black & white on A4.</p>
+    <label class="drop" id="drop" tabindex="0">
+      <b>Tap to choose files</b><span class="muted">or drop them here · JPG, PNG, PDF</span>
+      <input type="file" id="file" accept="image/*,application/pdf" multiple>
+    </label>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="row"><label>Copies</label>
+      <div class="stepper"><button id="cMinus" aria-label="Fewer copies">−</button><output id="copies">1</output><button id="cPlus" aria-label="More copies">+</button></div></div>
+    <div class="row"><label>Sides</label>
+      <div class="seg" id="sides"><button data-v="0" class="on">One side</button><button data-v="1">Both sides</button></div></div>
+    <div class="row"><label for="name">Your name</label><input type="text" id="name" placeholder="Optional — helps the shop find your prints" maxlength="40"></div>
+    <div class="bill"><div><div class="muted" id="billLine">Add files to see the price</div><div class="amt" id="amt">₹0</div></div>
+      <button class="btn" id="payBtn" disabled>Pay & continue</button></div>
+    <div class="err" id="err1"></div>
+  </section>
+
+  <section id="stepCrop">
+    <div class="paid" id="paidNote">Payment received ✓</div>
+    <h2>Check your pages</h2>
+    <p class="muted">We cropped each photo to the paper and cleaned it up for black & white printing. Tap <b>Adjust</b> to fix a crop.</p>
+    <label class="toggle"><input type="checkbox" id="fill" checked> Rotate landscape pages to fill A4</label>
+    <div class="pages" id="pages"></div>
+    <button class="btn" id="sendBtn" style="width:100%">Send to printer</button>
+    <div class="err" id="err3"></div>
+  </section>
+
+  <section id="stepDone">
+    <h2 style="text-align:center">Show this code at the counter</h2>
+    <div class="code" id="code">----</div>
+    <p class="status" id="jobStatus">In the print queue…</p>
+    <p class="muted" style="text-align:center">Keep this page open — it updates when your prints are ready.</p>
+  </section>
+</main>
+
+<div id="editor">
+  <div class="stage" id="stage"><canvas id="ecv"></canvas></div>
+  <div class="bar">
+    <button class="btn ghost small" id="eAuto">Auto crop</button>
+    <button class="btn ghost small" id="eFull">Whole image</button>
+    <button class="btn ghost small" id="eRot">Rotate ↻</button>
+    <button class="btn ghost small" id="eCancel">Cancel</button>
+    <button class="btn small" id="eApply">Apply</button>
+  </div>
+</div>
+<div id="demoPay"><div><h2>Demo payment</h2><p class="muted">Razorpay keys are not set on the server, so this is a test payment. No money moves.</p>
+  <p style="font-size:28px;font-weight:800" id="demoAmt"></p>
+  <div class="row"><button class="btn ghost" id="demoCancel">Cancel</button><button class="btn" id="demoOk">Pay (demo)</button></div></div></div>
+<div id="busy"><span id="busyText">Working…</span></div>
+
+<script>
+{
+const $ = id => document.getElementById(id);
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const A4W = 1654, A4H = 2339, MARGIN = 0.035;   // 200 dpi A4, ~7 mm safe margin for the M2170
+let cfg = { priceSingle: 2, priceDuplex: 3, maxPages: 100, maxCopies: 20, demo: true };
+let pages = [];        // {src:canvas, kind, rect, autoRect, rot, auto, enhance}
+let copies = 1, duplex = false, orderId = null;
+
+const busy = (on, t) => { $('busy').classList.toggle('on', on); if (t) $('busyText').textContent = t; };
+const step = n => {
+  ['stepUpload', 'stepCrop', 'stepDone'].forEach((s, i) => $(s).classList.toggle('on', [1, 3, 4][i] === n));
+  for (let i = 1; i <= 4; i++) { $('s' + i).className = i < n ? 'done' : i === n ? 'on' : ''; }
+  scrollTo(0, 0);
+};
+
+fetch('/api/config').then(r => r.json()).then(c => { cfg = c; $('shopName').textContent = c.shopName; document.title = c.shopName; bill(); });
+
+// ---------- loading files ----------
+function toCanvas(src, w, h, max) {
+  const s = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * s); c.height = Math.round(h * s);
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
+async function addFiles(list) {
+  $('err1').textContent = '';
+  busy(true, 'Reading files…');
+  for (const f of list) {
+    try {
+      if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+        if (!window.pdfjsLib) throw new Error('PDF reader did not load');
+        const pdf = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise;
+        for (let n = 1; n <= pdf.numPages && pages.length < cfg.maxPages; n++) {
+          const p = await pdf.getPage(n);
+          const v1 = p.getViewport({ scale: 1 });
+          const vp = p.getViewport({ scale: A4W / Math.min(v1.width, v1.height) });
+          const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+          const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+          await p.render({ canvasContext: ctx, viewport: vp }).promise;
+          addPage(c, 'pdf');
+        }
+      } else if (f.type.startsWith('image/')) {
+        const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' });
+        addPage(toCanvas(bmp, bmp.width, bmp.height, 2600), 'img');
+      }
+    } catch (e) { $('err1').textContent = `Could not read ${f.name}`; }
+  }
+  if (pages.length >= cfg.maxPages) $('err1').textContent = `Maximum ${cfg.maxPages} pages per order.`;
+  busy(false); drawThumbs(); bill();
+}
+function addPage(c, kind) {
+  const full = { x: 0, y: 0, w: c.width, h: c.height };
+  const autoRect = kind === 'img' ? autoCrop(c) : full;
+  pages.push({ src: c, kind, autoRect, rect: autoRect, rot: 0, auto: kind === 'img', enhance: kind === 'img' });
+}
+function drawThumbs() {
+  $('thumbs').innerHTML = '';
+  pages.forEach((p, i) => {
+    const fig = document.createElement('figure');
+    const t = toCanvas(p.src, p.src.width, p.src.height, 240);
+    fig.append(t);
+    const cap = document.createElement('figcaption'); cap.textContent = i + 1; fig.append(cap);
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.setAttribute('aria-label', 'Remove page ' + (i + 1));
+    x.onclick = () => { pages.splice(i, 1); drawThumbs(); bill(); };
+    fig.append(x); $('thumbs').append(fig);
+  });
+}
+$('file').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+const drop = $('drop');
+drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); };
+
+// ---------- price ----------
+function amount() {
+  const n = pages.length;
+  return duplex ? Math.ceil(n / 2) * copies * cfg.priceDuplex : n * copies * cfg.priceSingle;
+}
+function bill() {
+  const n = pages.length;
+  $('copies').textContent = copies;
+  $('amt').textContent = '₹' + amount();
+  $('payBtn').disabled = n === 0;
+  $('billLine').textContent = !n ? 'Add files to see the price' : duplex
+    ? `${n} page${n > 1 ? 's' : ''} → ${Math.ceil(n / 2)} sheet${Math.ceil(n / 2) > 1 ? 's' : ''} × ${copies} × ₹${cfg.priceDuplex} (both sides)`
+    : `${n} page${n > 1 ? 's' : ''} × ${copies} cop${copies > 1 ? 'ies' : 'y'} × ₹${cfg.priceSingle}`;
+}
+$('cMinus').onclick = () => { copies = Math.max(1, copies - 1); bill(); };
+$('cPlus').onclick = () => { copies = Math.min(cfg.maxCopies, copies + 1); bill(); };
+$('sides').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  duplex = b.dataset.v === '1';
+  [...$('sides').children].forEach(x => x.classList.toggle('on', x === b)); bill();
+};
+
+// ---------- payment ----------
+const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Request failed'); return j; });
+
+$('payBtn').onclick = async () => {
+  $('err1').textContent = '';
+  try {
+    busy(true, 'Starting payment…');
+    const o = await post('/api/order', { pages: pages.length, copies, duplex });
+    busy(false);
+    const verified = async (paymentId, signature) => {
+      busy(true, 'Confirming payment…');
+      await post('/api/verify', { orderId: o.orderId, paymentId, signature });
+      orderId = o.orderId; busy(false); $('paidNote').textContent = `Payment of ₹${o.amount} received ✓`;
+      buildPages(); step(3);
+    };
+    if (o.demo) {
+      $('demoAmt').textContent = '₹' + o.amount; $('demoPay').classList.add('on');
+      $('demoOk').onclick = () => { $('demoPay').classList.remove('on'); verified('demo', '').catch(fail1); };
+      $('demoCancel').onclick = () => $('demoPay').classList.remove('on');
+    } else {
+      const rzp = new Razorpay({
+        key: o.keyId, amount: o.amount * 100, currency: 'INR', order_id: o.orderId,
+        name: cfg.shopName, description: `${pages.length} page(s) × ${copies}`,
+        handler: r => verified(r.razorpay_payment_id, r.razorpay_signature).catch(fail1),
+        theme: { color: '#111111' },
+      });
+      rzp.on('payment.failed', r => fail1(new Error(r.error?.description || 'Payment failed')));
+      rzp.open();
+    }
+  } catch (e) { fail1(e); }
+};
+function fail1(e) { busy(false); $('err1').textContent = e.message; }
+
+// ---------- auto crop: find the sheet of paper, or trim blank borders ----------
+function autoCrop(c) {
+  const s = Math.min(1, 360 / Math.max(c.width, c.height));
+  const w = Math.max(1, Math.round(c.width * s)), h = Math.max(1, Math.round(c.height * s));
+  const t = document.createElement('canvas'); t.width = w; t.height = h;
+  const tx = t.getContext('2d'); tx.drawImage(c, 0, 0, w, h);
+  const d = tx.getImageData(0, 0, w, h).data, g = new Uint8Array(w * h), hist = new Array(256).fill(0);
+  for (let i = 0; i < w * h; i++) { const v = (d[i * 4] * 299 + d[i * 4 + 1] * 587 + d[i * 4 + 2] * 114) / 1000 | 0; g[i] = v; hist[v]++; }
+  // Otsu threshold
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i]; if (!wB) continue; const wF = w * h - wB; if (!wF) break;
+    sB += i * hist[i]; const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) ** 2;
+    if (v > best) { best = v; th = i; }
+  }
+  // largest bright connected region = the paper
+  const seen = new Uint8Array(w * h), stack = new Int32Array(w * h);
+  let bestBox = null, bestN = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (seen[i] || g[i] <= th) continue;
+    let sp = 0, n = 0, x0 = w, y0 = h, x1 = 0, y1 = 0; stack[sp++] = i; seen[i] = 1;
+    while (sp) {
+      const p = stack[--sp], x = p % w, y = (p / w) | 0; n++;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      const nb = [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1];
+      for (const q of nb) if (q >= 0 && !seen[q] && g[q] > th) { seen[q] = 1; stack[sp++] = q; }
+    }
+    if (n > bestN) { bestN = n; bestBox = { x0, y0, x1, y1 }; }
+  }
+  let box = bestBox;
+  const covers = box && (box.x1 - box.x0) > w * 0.96 && (box.y1 - box.y0) > h * 0.96;
+  if (!box || bestN < w * h * 0.12 || covers) {
+    // no distinct sheet (scan / screenshot): trim the plain border around the content
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (g[y * w + x] < th) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (x1 < 0) return { x: 0, y: 0, w: c.width, h: c.height };
+    const px = w * 0.03, py = h * 0.03;
+    box = { x0: Math.max(0, x0 - px), y0: Math.max(0, y0 - py), x1: Math.min(w - 1, x1 + px), y1: Math.min(h - 1, y1 + py) };
+  } else {
+    const ix = (box.x1 - box.x0) * 0.008, iy = (box.y1 - box.y0) * 0.008;  // step just inside the paper edge
+    box = { x0: box.x0 + ix, y0: box.y0 + iy, x1: box.x1 - ix, y1: box.y1 - iy };
+  }
+  const r = { x: Math.round(box.x0 / s), y: Math.round(box.y0 / s), w: Math.round((box.x1 - box.x0 + 1) / s), h: Math.round((box.y1 - box.y0 + 1) / s) };
+  r.w = Math.min(r.w, c.width - r.x); r.h = Math.min(r.h, c.height - r.y);
+  return r.w > 20 && r.h > 20 ? r : { x: 0, y: 0, w: c.width, h: c.height };
+}
+
+// ---------- render a print-ready A4 page (grayscale, cleaned, fitted) ----------
+function render(p) {
+  const r = p.rect;
+  let cw = r.w, ch = r.h;
+  const crop = document.createElement('canvas'); crop.width = cw; crop.height = ch;
+  crop.getContext('2d').drawImage(p.src, r.x, r.y, r.w, r.h, 0, 0, cw, ch);
+  let rot = p.rot;
+  if ($('fill').checked && (rot % 180 === 0 ? cw > ch : ch > cw)) rot = (rot + 90) % 360;
+  const out = document.createElement('canvas'); out.width = A4W; out.height = A4H;
+  const o = out.getContext('2d'); o.fillStyle = '#fff'; o.fillRect(0, 0, A4W, A4H);
+  const rw = rot % 180 ? ch : cw, rh = rot % 180 ? cw : ch;
+  const boxW = A4W * (1 - 2 * MARGIN), boxH = A4H * (1 - 2 * MARGIN);
+  const sc = Math.min(boxW / rw, boxH / rh), dw = rw * sc, dh = rh * sc;
+  o.save(); o.translate(A4W / 2, A4H / 2); o.rotate(rot * Math.PI / 180);
+  const iw = rot % 180 ? dh : dw, ih = rot % 180 ? dw : dh;
+  o.imageSmoothingQuality = 'high';
+  o.drawImage(crop, -iw / 2, -ih / 2, iw, ih); o.restore();
+  // grayscale (M2170 is mono) + optional "scan" clean-up that whitens the paper and darkens text
+  const img = o.getImageData(0, 0, A4W, A4H), d = img.data, hist = new Array(256).fill(0);
+  for (let i = 0; i < d.length; i += 4) { const v = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0; d[i] = v; hist[v]++; }
+  let lo = 0, hi = 255;
+  if (p.enhance) {
+    const total = A4W * A4H; let acc = 0;
+    for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc > total * 0.01) { lo = i; break; } }
+    acc = 0;
+    for (let i = 255; i >= 0; i--) { acc += hist[i]; if (acc > total * 0.35) { hi = i; break; } }
+    if (hi - lo < 40) { lo = 0; hi = 255; }
+  }
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) { let v = (i - lo) / (hi - lo); v = Math.min(1, Math.max(0, v)); lut[i] = p.enhance ? 255 * v ** 1.25 : i; }
+  for (let i = 0; i < d.length; i += 4) { const v = lut[d[i]]; d[i] = d[i + 1] = d[i + 2] = v; }
+  o.putImageData(img, 0, 0);
+  return out;
+}
+
+// ---------- step 3: review & adjust ----------
+function buildPages() {
+  $('pages').innerHTML = '';
+  pages.forEach((p, i) => {
+    const el = document.createElement('div'); el.className = 'pg';
+    el.innerHTML = `<canvas width="${A4W / 4}" height="${A4H / 4}"></canvas><div class="tools">
+      <button data-a="adjust">Adjust</button><button data-a="auto">Auto crop</button><button data-a="enh">Clean up</button></div>
+      <div class="muted" style="margin-top:4px">Page ${i + 1}</div>`;
+    el.onclick = e => {
+      const a = e.target.dataset?.a; if (!a) return;
+      if (a === 'adjust') openEditor(i);
+      if (a === 'auto') { p.auto = !p.auto; p.rect = p.auto ? p.autoRect : { x: 0, y: 0, w: p.src.width, h: p.src.height }; paint(i); }
+      if (a === 'enh') { p.enhance = !p.enhance; paint(i); }
+    };
+    $('pages').append(el); paint(i);
+  });
+}
+function paint(i) {
+  const p = pages[i], el = $('pages').children[i];
+  const cv = el.querySelector('canvas'); cv.getContext('2d').drawImage(render(p), 0, 0, cv.width, cv.height);
+  el.querySelector('[data-a=auto]').classList.toggle('on', p.auto);
+  el.querySelector('[data-a=enh]').classList.toggle('on', p.enhance);
+}
+$('fill').onchange = () => pages.forEach((_, i) => paint(i));
+
+// ---------- crop editor ----------
+let ed = null;
+const ecv = $('ecv'), ectx = ecv.getContext('2d');
+function openEditor(i) {
+  const p = pages[i];
+  ed = { i, rect: { ...p.rect }, rot: p.rot, drag: null };
+  $('editor').classList.add('on'); drawEditor();
+}
+function layout() {
+  const st = $('stage'), W = st.clientWidth, H = st.clientHeight, dpr = devicePixelRatio || 1;
+  ecv.width = W * dpr; ecv.height = H * dpr; ectx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const src = pages[ed.i].src, s = Math.min((W - 40) / src.width, (H - 40) / src.height);
+  return { s, ox: (W - src.width * s) / 2, oy: (H - src.height * s) / 2, W, H };
+}
+function drawEditor() {
+  if (!ed) return;
+  const L = layout(), src = pages[ed.i].src, r = ed.rect; ed.L = L;
+  ectx.clearRect(0, 0, L.W, L.H);
+  ectx.drawImage(src, L.ox, L.oy, src.width * L.s, src.height * L.s);
+  const x = L.ox + r.x * L.s, y = L.oy + r.y * L.s, w = r.w * L.s, h = r.h * L.s;
+  ectx.fillStyle = 'rgba(0,0,0,.55)';
+  ectx.fillRect(L.ox, L.oy, src.width * L.s, y - L.oy);
+  ectx.fillRect(L.ox, y + h, src.width * L.s, L.oy + src.height * L.s - y - h);
+  ectx.fillRect(L.ox, y, x - L.ox, h);
+  ectx.fillRect(x + w, y, L.ox + src.width * L.s - x - w, h);
+  ectx.strokeStyle = '#4f7bff'; ectx.lineWidth = 2; ectx.strokeRect(x, y, w, h);
+  ectx.fillStyle = '#fff';
+  for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) { ectx.beginPath(); ectx.arc(cx, cy, 11, 0, 7); ectx.fill(); ectx.stroke(); }
+  ectx.fillStyle = '#fff'; ectx.font = '14px Archivo,sans-serif';
+  ectx.fillText(`Rotation ${ed.rot}°  ·  drag corners or move the box`, 12, 22);
+}
+const toImg = e => { const b = ecv.getBoundingClientRect(), L = ed.L; return { x: (e.clientX - b.left - L.ox) / L.s, y: (e.clientY - b.top - L.oy) / L.s }; };
+ecv.addEventListener('pointerdown', e => {
+  if (!ed) return; const pt = toImg(e), r = ed.rect, tol = 26 / ed.L.s;
+  const corners = { nw: [r.x, r.y], ne: [r.x + r.w, r.y], sw: [r.x, r.y + r.h], se: [r.x + r.w, r.y + r.h] };
+  let mode = null;
+  for (const k in corners) if (Math.hypot(pt.x - corners[k][0], pt.y - corners[k][1]) < tol) mode = k;
+  if (!mode && pt.x > r.x && pt.x < r.x + r.w && pt.y > r.y && pt.y < r.y + r.h) mode = 'move';
+  if (mode) { ed.drag = { mode, pt, r0: { ...r } }; ecv.setPointerCapture(e.pointerId); }
+});
+ecv.addEventListener('pointermove', e => {
+  if (!ed?.drag) return;
+  const pt = toImg(e), { mode, r0 } = ed.drag, dx = pt.x - ed.drag.pt.x, dy = pt.y - ed.drag.pt.y;
+  const src = pages[ed.i].src, min = 40;
+  let x0 = r0.x, y0 = r0.y, x1 = r0.x + r0.w, y1 = r0.y + r0.h;
+  if (mode === 'move') { const mx = Math.min(Math.max(dx, -x0), src.width - x1), my = Math.min(Math.max(dy, -y0), src.height - y1); x0 += mx; x1 += mx; y0 += my; y1 += my; }
+  if (mode.includes('w')) x0 = Math.min(Math.max(0, x0 + dx), x1 - min);
+  if (mode.includes('e')) x1 = Math.max(Math.min(src.width, x1 + dx), x0 + min);
+  if (mode.includes('n')) y0 = Math.min(Math.max(0, y0 + dy), y1 - min);
+  if (mode.includes('s')) y1 = Math.max(Math.min(src.height, y1 + dy), y0 + min);
+  ed.rect = { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) };
+  drawEditor();
+});
+ecv.addEventListener('pointerup', () => { if (ed) ed.drag = null; });
+const editorRO = new ResizeObserver(drawEditor); editorRO.observe($('stage'));
+$('eAuto').onclick = () => { ed.rect = { ...pages[ed.i].autoRect }; drawEditor(); };
+$('eFull').onclick = () => { const s = pages[ed.i].src; ed.rect = { x: 0, y: 0, w: s.width, h: s.height }; drawEditor(); };
+$('eRot').onclick = () => { ed.rot = (ed.rot + 90) % 360; drawEditor(); };
+$('eCancel').onclick = () => { ed = null; $('editor').classList.remove('on'); };
+$('eApply').onclick = () => {
+  const p = pages[ed.i]; p.rect = ed.rect; p.rot = ed.rot;
+  const a = p.autoRect; p.auto = a.x === p.rect.x && a.y === p.rect.y && a.w === p.rect.w && a.h === p.rect.h;
+  const i = ed.i; ed = null; $('editor').classList.remove('on'); paint(i);
+};
+
+// ---------- send to the shop's print queue ----------
+$('sendBtn').onclick = async () => {
+  $('err3').textContent = ''; $('sendBtn').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('orderId', orderId); fd.append('name', $('name').value.trim());
+    for (let i = 0; i < pages.length; i++) {
+      busy(true, `Preparing page ${i + 1} of ${pages.length}…`);
+      const blob = await new Promise(res => render(pages[i]).toBlob(res, 'image/jpeg', 0.85));
+      fd.append('pages', blob, `${i + 1}.jpg`);
+    }
+    busy(true, 'Sending to printer…');
+    const r = await fetch('/api/jobs', { method: 'POST', body: fd });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Upload failed');
+    busy(false); $('code').textContent = j.code; step(4); poll(j.jobId);
+  } catch (e) { busy(false); $('err3').textContent = e.message + ' — tap again to retry (you will not be charged twice).'; $('sendBtn').disabled = false; }
+};
+function poll(id) {
+  const labels = { queued: 'In the print queue…', printed: 'Printed ✓ — collect at the counter', collected: 'Collected. Thank you!' };
+  const tick = () => fetch('/api/jobs/' + id).then(r => r.json()).then(j => {
+    $('jobStatus').textContent = labels[j.status] || j.status;
+    if (j.status !== 'collected') setTimeout(tick, 5000);
+  }).catch(() => setTimeout(tick, 8000));
+  tick();
+}
+addEventListener('beforeunload', e => { if (orderId && $('stepCrop').classList.contains('on')) { e.preventDefault(); e.returnValue = ''; } });
+}
+</script>
+</body>
+</html>
