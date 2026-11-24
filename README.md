@@ -11,21 +11,25 @@ npm start
 - Customer page: http://localhost:3000/
 - Shop dashboard: http://localhost:3000/shop.html (PIN 1234)
 
-With no Razorpay keys it runs in **demo payment mode** so you can test the full flow.
+With no Razorpay keys it runs in **demo payment mode** so you can test the full flow — but only while
+`PUBLIC_URL` is `localhost`. On a public address the server refuses to start without Razorpay keys
+(set `DEMO_MODE=1` to override) and without a strong `SHOP_PIN`.
 
 ## Settings (environment variables)
 | Variable | Meaning | Default |
 |---|---|---|
 | `PUBLIC_URL` | Public address the QR points to (e.g. https://print.yourshop.in) | http://localhost:3000 |
 | `SHOP_NAME` | Shown to customers | Quick Print Shop |
-| `SHOP_PIN` | Dashboard password — **change it** | 1234 |
+| `SHOP_PIN` | Dashboard password. Required (8+ characters) when `PUBLIC_URL` is not localhost. 5 wrong tries lock that IP out for 15 min | 1234 (localhost only) |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | From Razorpay Dashboard → API Keys (use test keys first) | empty = demo |
 | `PRICE_SINGLE` | ₹ per page, one side | 2 |
 | `PRICE_DUPLEX` | ₹ per sheet, both sides | 3 |
+| `DEMO_MODE` | `1` = allow fake payments on a public URL (testing only) | off |
+| `TRUST_PROXY` | Express `trust proxy` setting, for reading the real client IP behind a proxy | loopback, private ranges |
 
 Example (Windows PowerShell):
 ```
-$env:PUBLIC_URL="https://print.yourshop.in"; $env:SHOP_PIN="7391"; $env:RAZORPAY_KEY_ID="rzp_test_..."; $env:RAZORPAY_KEY_SECRET="..."; npm start
+$env:PUBLIC_URL="https://print.yourshop.in"; $env:SHOP_PIN="k7-river-3921"; $env:RAZORPAY_KEY_ID="rzp_test_..."; $env:RAZORPAY_KEY_SECRET="..."; npm start
 ```
 
 ## Hosting
@@ -54,4 +58,6 @@ Customers' phones must reach the server over **HTTPS** (Razorpay needs it). Easi
   screenshots it trims the empty border. Customers can drag corners, rotate, or turn crop/clean-up off.
 - Every page is sent as a grayscale A4 image (200 dpi) with a ~7 mm safe margin, so it prints the
   same on the M2170 every time.
-- Customers get a 4-digit pickup code; the page shows "Printed ✓" when you print it.
+- Data lives in `data/db.json` (written atomically, previous version kept as `db.json.bak`) and
+  `data/jobs/`. If `db.json` is damaged the server stops instead of starting empty.
+- Customers get a random 4-digit pickup code, unique among jobs not yet collected; the page shows "Printed ✓" when you print it.

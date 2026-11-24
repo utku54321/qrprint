@@ -90,7 +90,13 @@ try { pin = localStorage.getItem('shopPin') || ''; } catch {}
 let jobs = [], seen = new Set(), printing = false, autoQ = [];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const api = (url, opt = {}) => fetch(url, { ...opt, headers: { 'x-shop-pin': pin, 'Content-Type': 'application/json', ...(opt.headers || {}) } })
-  .then(r => { if (r.status === 401) throw new Error('Wrong PIN'); return r.json(); });
+  .then(async r => {
+    if (r.status === 401 || r.status === 429) { try { localStorage.removeItem('shopPin'); } catch {} throw new Error((await r.json().catch(() => ({}))).error || 'Wrong PIN'); }
+    return r.json();
+  });
+// Page images are fetched with the PIN in a header (not the URL) and shown as local blob: URLs.
+const pageUrl = (id, n) => fetch(`/api/shop/jobs/${id}/page/${n}`, { headers: { 'x-shop-pin': pin } })
+  .then(r => { if (!r.ok) throw new Error('Could not load page ' + n); return r.blob(); }).then(b => URL.createObjectURL(b));
 
 async function login() {
   try {
@@ -148,10 +154,10 @@ async function printJob(j) {
   if (!j || printing) return;
   printing = true;
   const area = $('printArea'); area.innerHTML = '';
-  const imgs = [];
-  for (let n = 1; n <= j.pages; n++) {
-    const im = new Image(); im.className = 'pg'; im.src = `/api/shop/jobs/${j.id}/page/${n}?pin=${encodeURIComponent(pin)}`; imgs.push(im);
-  }
+  let urls;
+  try { urls = await Promise.all(Array.from({ length: j.pages }, (_, i) => pageUrl(j.id, i + 1))); }
+  catch (e) { alert(`Job ${j.code}: ${e.message}`); printing = false; return; }
+  const imgs = urls.map(u => { const im = new Image(); im.className = 'pg'; im.src = u; return im; });
   await Promise.all(imgs.map(im => im.decode().catch(() => {})));
   for (let c = 0; c < j.copies; c++) {
     imgs.forEach(im => area.append(im.cloneNode()));
@@ -162,7 +168,7 @@ async function printJob(j) {
   window.print();                       // with Chrome --kiosk-printing this goes straight to the default printer
   document.title = 'Print Shop Dashboard';
   await api(`/api/shop/jobs/${j.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'printed' }) }).catch(() => {});
-  area.innerHTML = ''; printing = false; refresh();
+  area.innerHTML = ''; urls.forEach(u => URL.revokeObjectURL(u)); printing = false; refresh();
 }
 async function runAuto() {
   if (printing) return;

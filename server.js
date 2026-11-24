@@ -18,19 +18,52 @@ const PRICE_DUPLEX = Number(process.env.PRICE_DUPLEX || 3);   // ₹ per sheet, 
 const MAX_PAGES = 100, MAX_COPIES = 20;
 const DEMO = !(RZP_KEY_ID && RZP_KEY_SECRET);                 // no keys → fake payment for testing
 
+// ---------- safety checks before starting ----------
+// "Local" = the QR points at this machine only, so nobody outside can reach it.
+const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(PUBLIC_URL);
+const die = msg => { console.error('\nQR Print will not start:\n  ' + msg + '\n'); process.exit(1); };
+if (!!RZP_KEY_ID !== !!RZP_KEY_SECRET)
+  die('Set BOTH RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET (only one is set).');
+if (DEMO && !LOCAL && process.env.DEMO_MODE !== '1')
+  die(`No Razorpay keys, but PUBLIC_URL (${PUBLIC_URL}) is public — every order would be accepted as paid.\n` +
+    '  Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET, or set DEMO_MODE=1 if you really want fake payments.');
+if (!LOCAL && (SHOP_PIN === '1234' || SHOP_PIN.length < 8))
+  die('SHOP_PIN must be set to at least 8 characters (and not 1234) when the server is public.');
+
 // ---------- tiny JSON storage ----------
 const DATA = path.join(__dirname, 'data');
 const JOBS_DIR = path.join(DATA, 'jobs');
 fs.mkdirSync(JOBS_DIR, { recursive: true });
 const DB_FILE = path.join(DATA, 'db.json');
 let db = { orders: {}, jobs: {} };
-try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch {}
-const save = () => fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 1));
+try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); }
+catch (e) {
+  // A missing file is normal on first run; a broken one must not be silently replaced with an empty database.
+  if (e.code !== 'ENOENT') die(`${DB_FILE} could not be read (${e.message}). Fix or restore it from ${DB_FILE}.bak.`);
+}
+// Write to a temp file and rename, so a crash or power cut mid-write never leaves a half-written db.json.
+const save = () => {
+  const tmp = DB_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(db, null, 1));
+  try { fs.copyFileSync(DB_FILE, DB_FILE + '.bak'); } catch {}
+  fs.renameSync(tmp, DB_FILE);
+};
+
+// 4-digit pickup code, cryptographically random and never shared with another job still waiting to be collected
+function newPickupCode() {
+  const inUse = new Set(Object.values(db.jobs).filter(j => j.status !== 'collected').map(j => j.code));
+  if (inUse.size >= 9000) throw new Error('No free pickup codes — mark collected jobs as collected');
+  let code;
+  do code = String(crypto.randomInt(1000, 10000)); while (inUse.has(code));
+  return code;
+}
 
 const price = (pages, copies, duplex) =>
   duplex ? Math.ceil(pages / 2) * copies * PRICE_DUPLEX : pages * copies * PRICE_SINGLE;
 
 const app = express();
+// Behind Cloudflare Tunnel / Render / a reverse proxy, read the real client IP (used for PIN lockout).
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal');
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -95,7 +128,8 @@ app.post('/api/jobs', upload.array('pages', MAX_PAGES), (req, res) => {
   const dir = path.join(JOBS_DIR, id);
   fs.mkdirSync(dir);
   files.forEach((f, i) => fs.writeFileSync(path.join(dir, `${i + 1}.jpg`), f.buffer));
-  const code = String(Math.floor(1000 + Math.random() * 9000));
+  let code;
+  try { code = newPickupCode(); } catch (e) { return res.status(503).json({ error: e.message }); }
   db.jobs[id] = { id, code, orderId: o.id, pages: o.pages, copies: o.copies, duplex: o.duplex,
     amount: o.amount, status: 'queued', createdAt: Date.now(), name: String(req.body.name || '').slice(0, 40) };
   o.jobId = id; o.status = 'used';
@@ -110,8 +144,25 @@ app.get('/api/jobs/:id', (req, res) => {
 });
 
 // ---------- shop side (PIN protected) ----------
-const shopAuth = (req, res, next) =>
-  (req.get('x-shop-pin') || req.query.pin) === SHOP_PIN ? next() : res.status(401).json({ error: 'Wrong PIN' });
+// The PIN is only accepted in the x-shop-pin header (never in the URL, where it would end up in logs).
+// After 5 wrong PINs from one IP, that IP is locked out for 15 minutes.
+const MAX_FAILS = 5, LOCK_MS = 15 * 60 * 1000;
+const fails = new Map();   // ip -> { n, until }
+const pinHash = s => crypto.createHash('sha256').update(String(s)).digest();
+const PIN_HASH = pinHash(SHOP_PIN);
+const shopAuth = (req, res, next) => {
+  const ip = req.ip, f = fails.get(ip), now = Date.now();
+  if (f && f.until > now) {
+    res.set('Retry-After', String(Math.ceil((f.until - now) / 1000)));
+    return res.status(429).json({ error: 'Too many wrong PINs — try again in 15 minutes' });
+  }
+  const given = req.get('x-shop-pin');
+  if (given && crypto.timingSafeEqual(pinHash(given), PIN_HASH)) { fails.delete(ip); return next(); }
+  const n = (f && f.until <= now && f.n >= MAX_FAILS ? 0 : f?.n || 0) + 1;
+  fails.set(ip, { n, until: n >= MAX_FAILS ? now + LOCK_MS : 0 });
+  if (fails.size > 10000) for (const [k, v] of fails) if (v.until < now) fails.delete(k);
+  res.status(401).json({ error: 'Wrong PIN' });
+};
 
 app.get('/api/shop/jobs', shopAuth, (req, res) =>
   res.json(Object.values(db.jobs).sort((a, b) => b.createdAt - a.createdAt).slice(0, 200)));
@@ -134,4 +185,4 @@ app.get('/api/shop/qr.svg', async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(
-  `QR Print running on ${PUBLIC_URL}\n  Customer page: ${PUBLIC_URL}/\n  Shop dashboard: ${PUBLIC_URL}/shop.html (PIN ${SHOP_PIN})\n  Payments: ${DEMO ? 'DEMO mode (add Razorpay keys for real payments)' : 'Razorpay LIVE/TEST keys loaded'}`));
+  `QR Print running on ${PUBLIC_URL}\n  Customer page: ${PUBLIC_URL}/\n  Shop dashboard: ${PUBLIC_URL}/shop.html \n  Payments: ${DEMO ? 'DEMO mode (add Razorpay keys for real payments)' : 'Razorpay LIVE/TEST keys loaded'}`));
